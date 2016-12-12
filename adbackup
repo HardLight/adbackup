@@ -68,8 +68,9 @@ printDevices()
 }
 
 # Defaults
-backupPath="."
+backupPath="backup_root"
 deviceNum="1"
+configPath="adbackup.conf"
 
 args="$(getopt -o d:prh --long device:,print,reverse,help -n ${0##*/} -- "$@")"
 (( $? != 0 )) && exit 1
@@ -118,9 +119,14 @@ if [[ ! -d "$backupPath" ]]; then
 	exit 2
 fi
 
+# Check if config file is not empty
+if [[ -z "$(cat $configPath 2>/dev/null)" ]]; then
+	echo "Error: No $configPath file found, creating default."
+	echo "Internal storage/DCIM/Camera" > $configPath
+fi
+
 # Find leaf directories
-skel="$(find $backupPath -type d -exec \
-sh -c '(ls -p "$1" | grep / >/dev/null) || echo "$1"' _ {} \;)"
+skel=$(echo "$(cat $configPath)" | sed "s/^/$backupPath\//g")
 
 # Select working device
 devicePath="$(find "/run/user/$(id -u)/gvfs/" -maxdepth 1 -type d -name 'mtp:*')"
@@ -137,8 +143,6 @@ else
 	devicePath="$(echo $devicePath | head -n$deviceNum | tail -n1)"
 fi
 
-
-
 # Show summary and prompt user
 echo "Device:"
 deviceInfo "$devicePath"
@@ -154,14 +158,15 @@ read -r ans
 # Do incremental backup
 if [[ $ans == y || $ans == Y || ! $ans ]]; then
 	IFS=$'\n'
-	cmd() { rsync -avh --delete "$@" ;}
+	cmd() { rsync -avhP --delete "$@" ;}
 	# If doing reverse operation, permissions and timestamps cannot be preserved
 	# on Android device over MTP because of a bug in FUSE implementation,
 	# so we must use `-rl --size-only` instead of `-a` rsync option.
 	# Last tested on Android Marshmallow, and still not fixed.
-	cmd_r() { rsync -rlvh --size-only "$@" ;}
+	cmd_r() { rsync -rlvhP --size-only "$@" ;}
 	if [[ "$reverse" != true ]]; then
 		for dir in $skel; do
+			mkdir -p "$dir/"
 			cmd "${dir/$backupPath/$devicePath}/" "$dir/"
 		done
 	else
